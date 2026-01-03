@@ -103,6 +103,8 @@ Navigation
 ![](src/simulations//path_tracking/rear_wheel_feedback_tracking/rear_wheel_feedback_tracking.gif)  
 #### LQR(Linear Quadratic Regulator) Path Tracking
 ![](src/simulations/path_tracking/lqr_path_tracking/lqr_path_tracking.gif)  
+#### MPC(Model Predictive Control) Path Tracking
+![](src/simulations/path_tracking/mpc_path_tracking/mpc_path_tracking.gif)  
 #### Stanley steering control Path Tracking
 ![](src/simulations/path_tracking/stanley_path_tracking/stanley_path_tracking.gif)  
 ### Perception
