@@ -1,8 +1,6 @@
 """
-binary_grid_map_construction.py
-
-Author: Shisato Yano
-Updated by: Bhavesh Lokesh Agarwal
+potential_field_map_construction.py
+Author: Panav Arpit Raaj
 """
 
 # import path setting
@@ -19,7 +17,7 @@ sys.path.append(abs_dir_path + relative_path + "vehicle")
 sys.path.append(abs_dir_path + relative_path + "obstacle")
 sys.path.append(abs_dir_path + relative_path + "sensors")
 sys.path.append(abs_dir_path + relative_path + "sensors/lidar")
-sys.path.append(abs_dir_path + relative_path + "mapping/binary")
+sys.path.append(abs_dir_path + relative_path + "mapping/potential")
 sys.path.append(abs_dir_path + relative_path + "course/cubic_spline_course")
 sys.path.append(abs_dir_path + relative_path + "control/pure_pursuit")
 
@@ -36,7 +34,7 @@ from obstacle_list import ObstacleList
 from sensors import Sensors
 from sensor_parameters import SensorParameters
 from omni_directional_lidar import OmniDirectionalLidar
-from binary_grid_mapper import BinaryGridMapper
+from potential_field_mapper import PotentialFieldMapper
 from cubic_spline_course import CubicSplineCourse
 from pure_pursuit_controller import PurePursuitController
 
@@ -53,7 +51,7 @@ def main():
 
     # set simulation parameters
     x_lim, y_lim = MinMax(-5, 55), MinMax(-20, 25)
-    vis = GlobalXYVisualizer(x_lim, y_lim, TimeParameters(span_sec=25), show_zoom=False)
+    vis = GlobalXYVisualizer(x_lim, y_lim, TimeParameters(span_sec=30), show_zoom=False)
 
     # create course data instance
     course = CubicSplineCourse([0.0, 10.0, 25, 40, 50],
@@ -72,12 +70,23 @@ def main():
     obst_list.add_obstacle(Obstacle(State(x_m=35.0, y_m=-15.0), length_m=7, width_m=2))
     vis.add_object(obst_list)
 
-    # create vehicle instance
+    # create vehicle instance with potential field mapper
     spec = VehicleSpecification()
     pure_pursuit = PurePursuitController(spec, course)
     sensor_params = SensorParameters(lon_m=spec.wheel_base_m/2, max_m=15, dist_std_rate=0.05)
     lidar = OmniDirectionalLidar(obst_list, sensor_params)
-    mapper = BinaryGridMapper(sensor_params=sensor_params, center_x_m=25.0, center_y_m=5.0)
+    
+    # Create potential field mapper with goal at end of course
+    # zeta: attractive gain, eta: repulsive gain, rho: obstacle influence distance
+    mapper = PotentialFieldMapper(sensor_params=sensor_params,
+                                   center_x_m=25.0,
+                                   center_y_m=5.0,
+                                   zeta=0.1,
+                                   eta=200.0,
+                                   rho=5.0,
+                                   goal_x_m=50.0,
+                                   goal_y_m=-13.0)
+    
     vehicle = FourWheelsVehicle(State(color=spec.color), spec,
                                 controller=pure_pursuit,
                                 sensors=Sensors(lidar=lidar),

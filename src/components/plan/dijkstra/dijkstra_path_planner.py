@@ -1,7 +1,7 @@
 """
-astar_path_planner.py
+dijkstra_path_planning.py
 
-Author: Shantanu Parab
+Author: Ashish Varma
 """
 
 import numpy as np
@@ -21,7 +21,7 @@ relative_simulations = "/../../../simulations/"
 sys.path.append(abs_dir_path + relative_path + "visualization")
 sys.path.append(abs_dir_path + relative_path + "state")
 sys.path.append(abs_dir_path + relative_path + "obstacle")
-sys.path.append(abs_dir_path + relative_path + "plan/astar")
+sys.path.append(abs_dir_path + relative_path + "plan/dijkstra")
 sys.path.append(abs_dir_path + relative_path + "mapping/grid")
 
 
@@ -38,23 +38,21 @@ import json
 
 
 
-class AStarPathPlanner:
-    def __init__(self, start, goal, map_file, weight=1.0, x_lim=None, y_lim=None, path_filename=None, gif_name=None):
+class DijkstraPathPlanner:
+    def __init__(self, start, goal, map_file, x_lim=None, y_lim=None, path_filename=None, gif_name=None):
         """
-        Initialize the A* planner.
+        Initialize the Dijkstra planner.
         Args:
             start: (x, y) tuple for start position.
             goal: (x, y) tuple for goal position.
             obstacle_parameters: List of obstacle dictionaries.
             resolution: Grid resolution in meters.
-            weight: Heuristic weight for A*.
             visualize: Boolean to enable visualization during the search.
             x_lim: (min, max) tuple for x-axis range of the grid.
             y_lim: (min, max) tuple for y-axis range of the grid.
         """
         self.start = start
         self.goal = goal
-        self.weight = weight
         self.explored_nodes = []
         self.grid = self.load_grid_from_file(map_file)
         x_min, x_max = x_lim.min_value(), x_lim.max_value()
@@ -93,9 +91,6 @@ class AStarPathPlanner:
 
         return grid
 
-    def heuristic(self, a, b):
-        return self.weight * (abs(a[0] - b[0]) + abs(a[1] - b[1]))
-
     def is_valid(self, x, y):
         """
         Check if a grid cell is within bounds and not an obstacle.
@@ -109,7 +104,6 @@ class AStarPathPlanner:
     def search(self):
         start_idx = (int((self.start[0] - self.x_range[0]) /self.resolution),
                      int((self.start[1] - self.y_range[0]) /self.resolution))
-                     
         goal_idx = (int((self.goal[0] - self.x_range[0]) /self.resolution),
                     int((self.goal[1] - self.y_range[0]) /self.resolution))
 
@@ -133,10 +127,10 @@ class AStarPathPlanner:
                 neighbor = (current[0] + dx, current[1] + dy)
                 # print(f"Neighbor: {neighbor}")
                 if self.is_valid(neighbor[0], neighbor[1]):
-                    new_cost = cost_so_far[current] + 1
+                    new_cost = cost_so_far[current] + ((abs(neighbor[0] - current[0]) **2) + (abs(neighbor[1] - current[1]) **2)) ** 0.5
                     if neighbor not in cost_so_far or new_cost < cost_so_far[neighbor]:
                         cost_so_far[neighbor] = new_cost
-                        priority = new_cost + self.heuristic(neighbor, goal_idx)
+                        priority = new_cost
                         heapq.heappush(open_list, (priority, neighbor))
                         came_from[neighbor] = current
 
@@ -208,6 +202,12 @@ class AStarPathPlanner:
             print("Error: No explored nodes. Ensure search() is executed before visualize_search().")
             return
 
+        # Reduce frames by sampling every nth node to prevent memory exhaustion
+        max_frames = 2000  # Maximum number of animation frames
+        frame_step = max(1, len(self.explored_nodes) // max_frames)
+        sampled_nodes = self.explored_nodes[::frame_step]
+        
+        print(f"Reducing animation frames from {len(self.explored_nodes)} to {len(sampled_nodes)} nodes.")
 
         figure = plt.figure(figsize=(10, 8))
         axes = figure.add_subplot(111)
@@ -215,12 +215,13 @@ class AStarPathPlanner:
         axes.set_xlabel("X [m]", fontsize=15)
         axes.set_ylabel("Y [m]", fontsize=15)
 
+        self.sampled_nodes = sampled_nodes  # Store for update_frame access
 
         self.anime = anm.FuncAnimation(
             figure,
             self.update_frame,
             fargs=(axes, self.path),
-            frames=len(self.explored_nodes) + len(self.path),  # Include frames for the path
+            frames=len(sampled_nodes) + len(self.path),  # Include frames for the path
             interval=50,
             repeat=False,
         )
@@ -228,10 +229,23 @@ class AStarPathPlanner:
         if gif_name is not None:
             try:
                 print("Saving animation...")
-                self.anime.save(gif_name, writer="pillow")
+                # Use FFmpeg writer if available for better memory efficiency
+                try:
+                    self.anime.save(gif_name, writer="pillow", fps=20, 
+                                  savefig_kwargs={'bbox_inches': 'tight', 'dpi': 100})
+                except Exception:
+                    # Fallback to pillow with reduced quality
+                    self.anime.save(gif_name, writer="pillow")
                 print("Animation saved successfully.")
             except Exception as e:
                 print(f"Error saving animation: {e}")
+                # Try saving as MP4 instead if GIF fails
+                try:
+                    mp4_name = gif_name.replace('.gif', '.mp4')
+                    self.anime.save(mp4_name, writer="ffmpeg", fps=20)
+                    print(f"Saved as MP4 instead: {mp4_name}")
+                except Exception as e2:
+                    print(f"Both GIF and MP4 saving failed: {e2}")
         else:
             plt.show()
 
@@ -248,22 +262,37 @@ class AStarPathPlanner:
             axes: Matplotlib axes to draw on.
             path: The reconstructed path to draw after exploration.
         """
+        # Create a copy of the original grid to avoid modifying the source
+        display_grid = self.grid.copy()
+        
         # Exploration phase
-        if i < len(self.explored_nodes):
-            # Mark the current node as explored
-            node = self.explored_nodes[i]
-            grid_x = int(node[0])
-            grid_y = int(node[1])
-            self.grid[grid_y, grid_x] = 0.25  # Set a value to represent explored nodes
+        if i < len(self.sampled_nodes):
+            # Mark explored nodes up to current frame
+            for j in range(i + 1):
+                node = self.sampled_nodes[j]
+                grid_x = int(node[0])
+                grid_y = int(node[1])
+                if 0 <= grid_x < display_grid.shape[1] and 0 <= grid_y < display_grid.shape[0]:
+                    display_grid[grid_y, grid_x] = 0.25  # Set a value to represent explored nodes
 
         # Path reconstruction phase
         else:
-            path_index = i - len(self.explored_nodes)
-            if path_index < len(path):
-                node = path[path_index]
+            # Show all explored nodes
+            for node in self.sampled_nodes:
                 grid_x = int(node[0])
                 grid_y = int(node[1])
-                self.grid[grid_y, grid_x] = 0.5  # Set a value to represent the path
+                if 0 <= grid_x < display_grid.shape[1] and 0 <= grid_y < display_grid.shape[0]:
+                    display_grid[grid_y, grid_x] = 0.25
+                    
+            # Show path up to current frame
+            path_index = i - len(self.sampled_nodes)
+            if path_index < len(path):
+                for j in range(path_index + 1):
+                    node = path[j]
+                    grid_x = int(node[0])
+                    grid_y = int(node[1])
+                    if 0 <= grid_x < display_grid.shape[1] and 0 <= grid_y < display_grid.shape[0]:
+                        display_grid[grid_y, grid_x] = 0.5  # Set a value to represent the path
 
         # Clear the axes and redraw the updated grid
         axes.clear()
@@ -281,8 +310,7 @@ class AStarPathPlanner:
         # Create a colormap
         custom_cmap = ListedColormap(colors)
 
-
-        axes.imshow(self.grid, extent=[self.x_range[0], self.x_range[-1], self.y_range[0], self.y_range[-1]],
+        axes.imshow(display_grid, extent=[self.x_range[0], self.x_range[-1], self.y_range[0], self.y_range[-1]],
                     origin='lower', cmap=custom_cmap, alpha=0.8)
         axes.plot(self.start[0], self.start[1], 'go', label="Start")
         axes.plot(self.goal[0], self.goal[1], 'ro', label="Goal")
@@ -296,7 +324,7 @@ if __name__ == "__main__":
     # Define the path file to save the path that is generated by the planner
     path_file = "path.json"
     # Visualize the search process and save the gif
-    gif_path = "astar_search.gif"
+    gif_path = "dijkstra_search.gif"
 
     x_lim, y_lim = MinMax(-5, 55), MinMax(-20, 25)
 
@@ -304,7 +332,7 @@ if __name__ == "__main__":
     start = (0, 0)
     goal = (50, -10)
 
-    # Create the A* planner
-    planner = AStarPathPlanner(start, goal, map_file, weight=5.0, x_lim=x_lim, y_lim=y_lim, path_filename=path_file, gif_name=gif_path)
+    # Create the Dijkstra planner
+    planner = DijkstraPathPlanner(start, goal, map_file, x_lim=x_lim, y_lim=y_lim, path_filename=path_file, gif_name=gif_path)
 
 
